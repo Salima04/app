@@ -1,0 +1,165 @@
+{
+  "theme": {
+    "style": "Modern Enterprise SaaS with Dark Sidebar & Crisp Sandstone-White Content Canvas",
+    "mode": "hybrid-dark-sidebar-light-content",
+    "rationale": "Matches requested 'Modern SaaS dashboard with dark sidebar + light content'. Combines elite academic authority (Oxford slate & deep indigo sidebar) with crisp, ultra-legible high-contrast light content canvas for student QA evaluation, latency charts, citation review, and test runs."
+  },
+  "typography": {
+    "primary_font": "Outfit, system-ui, -apple-system, sans-serif",
+    "heading_font": "Cabinet Grotesk, Outfit, sans-serif",
+    "monospace_font": "JetBrains Mono, Menlo, monospace",
+    "font_weights": {
+      "light": "300",
+      "normal": "400",
+      "medium": "500",
+      "semibold": "600",
+      "bold": "700",
+      "black": "800"
+    },
+    "hierarchy": {
+      "h1": "text-3xl sm:text-4xl font-bold tracking-tight text-slate-900",
+      "h2": "text-2xl sm:text-3xl font-semibold tracking-tight text-slate-900",
+      "h3": "text-xl sm:text-2xl font-semibold tracking-normal text-slate-800",
+      "h4": "text-lg sm:text-xl font-medium text-slate-800",
+      "body": "text-sm sm:text-base text-slate-600 leading-relaxed",
+      "small": "text-xs font-medium text-slate-500 tracking-wide uppercase",
+      "mono_data": "font-mono text-xs text-indigo-700 bg-indigo-50/80 px-1.5 py-0.5 rounded border border-indigo-200"
+    }
+  },
+  "colors": {
+    "sidebar": {
+      "bg": "#0B1120",
+      "border": "#1E293B",
+      "active_bg": "#1E293B",
+      "active_text": "#38BDF8",
+      "text": "#94A3B8",
+      "hover_text": "#F8FAFC",
+      "accent_pill": "#6366F1"
+    },
+    "canvas": {
+      "bg": "#F8FAFC",
+      "card_bg": "#FFFFFF",
+      "card_border": "#E2E8F0",
+      "card_hover_border": "#CBD5E1",
+      "surface_elevated": "#FFFFFF"
+    },
+    "primary": {
+      "DEFAULT": "#4F46E5",
+      "hover": "#4338CA",
+      "active": "#3730A3",
+      "text": "#FFFFFF",
+      "subtle": "#EEF2FF",
+      "border": "#C7D2FE"
+    },
+    "academic_accent": {
+      "amber": "#D97706",
+      "emerald": "#059669",
+      "rose": "#E11D48",
+      "cyan": "#0891B2",
+      "violet": "#7C3AED"
+    },
+    "status": {
+      "p0_critical": {
+        "badge_bg": "#FEF2F2",
+        "badge_text": "#991B1B",
+        "border": "#FECACA",
+        "dot": "#EF4444"
+      },
+      "p1_high": {
+        "badge_bg": "#FFFBEB",
+        "badge_text": "#92400E",
+        "border": "#FDE68A",
+        "dot": "#F59E0B"
+      },
+      "p2_medium": {
+        "badge_bg": "#EFF6FF",
+        "badge_text": "#1E40AF",
+        "border": "#BFDBFE",
+        "dot": "#3B82F6"
+      },
+      "p3_low": {
+        "badge_bg": "#F0FDF4",
+        "badge_text": "#166534",
+        "border": "#BBF7D0",
+        "dot": "#22C55E"
+      },
+      "cache_hit": {
+        "badge_bg": "#ECFDF5",
+        "badge_text": "#065F46",
+        "border": "#A7F3D0",
+        "icon": "Zap"
+      },
+      "cache_miss": {
+        "badge_bg": "#FFF7ED",
+        "badge_text": "#9A3412",
+        "border": "#FED7AA",
+        "icon": "Layers"
+      }
+    }
+  },
+  "layout_and_grids": {
+    "structure": "Fixed dark left sidebar (w-64) + Top global bar (h-16 with College Selector & quick actions) + Scrollable content canvas with max-w-7xl px-8 py-6",
+    "bento_modes": {
+      "dashboard_kpis": "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5",
+      "charts_row": "grid grid-cols-1 lg:grid-cols-12 gap-6",
+      "observability_panel": "w-96 flex-shrink-0 border-l border-slate-200 bg-white/95 backdrop-blur-md overflow-y-auto p-5",
+      "rag_chat_layout": "flex h-[calc(100vh-4rem)] overflow-hidden",
+      "model_lab_comparison": "grid grid-cols-1 md:grid-cols-3 gap-6"
+    }
+  },
+  "component_path": {
+    "sidebar": "src/components/layout/AppSidebar.js",
+    "header": "src/components/layout/AppHeader.js",
+    "rag_chat": "src/components/chat/RagChatView.js",
+    "observability_panel": "src/components/chat/ObservabilityDrawer.js",
+    "qa_agent_modal": "src/components/qa/AutoQaAgentModal.js",
+    "test_runner_view": "src/components/qa/TestRunProgressView.js",
+    "model_lab": "src/components/models/ModelTestLabView.js",
+    "documents_manager": "src/components/documents/DocumentUploadManager.js",
+    "cache_analytics": "src/components/cache/CacheDashboardView.js",
+    "college_selector": "src/components/colleges/CollegeSelector.js",
+    "report_exporter": "src/components/reports/ReportExporterModal.js"
+  },
+  "image_urls": [
+    {
+      "category": "college_library_hero",
+      "description": "Grand academic library book aisles for RAG knowledge base background & banner",
+      "url": "https://images.unsplash.com/photo-1696197019015-68ef1bf9cb4a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTB8MHwxfHNlYXJjaHwxfHxjb2xsZWdlJTIwY2FtcHVzJTIwc3R1ZGVudHMlMjBsaWJyYXJ5fGVufDB8fHx8MTc4OTEzMTc4MXww&ixlib=rb-4.1.0&q=85"
+    },
+    {
+      "category": "campus_architecture",
+      "description": "Historic brick university building for College Property Management cards",
+      "url": "https://images.unsplash.com/photo-1741528804373-2bedeb308ce1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTB8MHwxfHNlYXJjaHw0fHxjb2xsZWdlJTIwY2FtcHVzJTIwc3R1ZGVudHMlMjBsaWJyYXJ5fGVufDB8fHx8MTc4OTEzMTc4MXww&ixlib=rb-4.1.0&q=85"
+    },
+    {
+      "category": "modern_campus_lse",
+      "description": "Prestigious university campus entrance for multi-institution tenancy switch",
+      "url": "https://images.unsplash.com/photo-1760620484707-0d63f7cf90da?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTJ8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBzdHVkZW50JTIwZ3JhZHVhdGlvbiUyMGNhbXB1c3xlbnwwfHx8fDE3ODkxMzE3ODF8MA&ixlib=rb-4.1.0&q=85"
+    },
+    {
+      "category": "university_crest",
+      "description": "Academic crest seal for institution badge and credentials verification",
+      "url": "https://images.unsplash.com/photo-1763365647503-aa022b5f2a5d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHwyfHx1bml2ZXJzaXR5JTIwZW1ibGVtJTIwbG9nbyUyMHNlYWx8ZW58MHx8fHwxNzg5MTMxNzgxfDA&ixlib=rb-4.1.0&q=85"
+    }
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": {
+    "banana_ux_philosophy": "Banana-grade delightful UX means frictionless clarity: live streaming feel, interactive citations that highlight exact chunk text in an inspect drawer, instant copy buttons, 1-click test triggers with live progress bars, quick model switch with delta metrics, and instant PDF/JSON/CSV export without broken layouts.",
+    "anti_ai_slop_rules": [
+      "NO generic centered cards or boring identical dashboard boxes.",
+      "NO transparent dropdowns or invisible blur overlays over text.",
+      "NEVER use generic emoji icons (🤖🧠💡). Use Lucide icons: Sparkles, ShieldAlert, Cpu, Database, CheckCircle2, AlertOctagon, Terminal, FileText, Zap, Compass, Filter, Download.",
+      "Always provide explicit hover state colors (e.g. hover:bg-slate-900 hover:text-white).",
+      "All numeric metrics must have delta badges (+4.2% vs last week, -18ms latency drop).",
+      "Every document uploaded must display chunk count, embedding status, parser type (Unstructured/PyPDF) and token footprint."
+    ],
+    "test_attributes": "All interactive buttons, inputs, links, tabs, and export triggers MUST include kebab-case data-testid attributes (e.g. data-testid='upload-document-btn', data-testid='trigger-qa-run-btn', data-testid='model-compare-select', data-testid='export-pdf-report').",
+    "chart_rules": "Use Recharts with responsive containers and custom styled Tooltips with rounded corners and shadow-lg. Accessible distinct color palette (Indigo, Emerald, Amber, Rose, Cyan)."
+  },
+  "instructions_to_main_agent": [
+    "1. Build the full VidyaGPT AI QA Platform with routing and modular views: Dashboard, Colleges/Properties, Documents & RAG Corpus, Student RAG Chat + Live Observability, Auto AI QA Agent (Quick/Standard/Full/Security/Regression modes), Test Run Live Progress & Severity Drilldowns, Model Test Lab (Side-by-side LLM benchmark: Claude 3.5 Sonnet vs GPT-4o vs Llama 3 70B), Golden Dataset Management, Cache Analytics, and Export Center.",
+    "2. Include robust mock databases and dynamic state for instant testing: pre-loaded colleges (e.g., St. Xavier's Institute of Tech, Delhi Apex University, Bangalore City College), uploaded documents (Student Handbook 2026, Fee Schedule, Academic Ordinances, Plagiarism Policy), golden QA triplets, test execution runs with P0/P1/P2 failures, and cache metrics.",
+    "3. Deliver a student RAG chat that renders rich markdown: tables, bullet points, citations with clickable badges [Doc 1, p. 14] opening the Observability Side Drawer with chunk text, cosine similarity score, latency breakdown (Retrieval: 68ms, Generation: 240ms), token count, and cost ($0.0014).",
+    "4. Ensure the Auto QA Agent supports triggering simulated student queries across Jailbreak, Prompt Injection, Out-of-syllabus hallucination, and PII leakage with live animated progress and P0-P3 severity breakdown.",
+    "5. Export functionality must allow instantaneous downloading of structured JSON, CSV, Excel, and printable PDF reports."
+  ]
+}

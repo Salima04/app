@@ -1,0 +1,53 @@
+{
+  "summary": "First testing run for VidyaGPT. Ran 15 backend pytest cases (14 passed, 1 failed) covering auth, properties, documents, chat/cache, cache stats, auto-QA quick run (full completion with 10 tests), model lab, golden, dashboard, and property isolation. Frontend flows exercised via Playwright: login, sidebar nav, add college, upload TXT document (status=Ready, 1 chunk), RAG chat (message rendered + observability drawer opens), Auto QA Agent page loads with Quick mode + Start button, Model Test Lab returns 3 side-by-side result cards with 'Recommended: GPT-5.4' badge. One critical business-logic bug found: RAG retrieval returns 0 chunks even when document is indexed, so chat/lab answers with 'I couldn't find this information' and citations=[]. Root cause is the deterministic hash-projected TF embedding + min_score=0.15 threshold in rag_service.retrieve() being too strict for small documents.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/chat",
+        "issue": "RAG retrieval returns 0 chunks for a valid, indexed 1-chunk TXT document (211 bytes). Response.citations=[], retrieved_chunks=[], content='I couldn't find this information in the available college documents.' This breaks the core RAG grounded-QA use case and cascades into POST /api/lab/compare (grounded_score=0% for all 3 models) and reduces Auto QA functional-test accuracy. Reproduction: upload the sample doc from the request ('Admissions require 60% in 12th standard. Fees are Rs 50000 per semester...'), POST /api/chat with question='What are the admission requirements?' → citations is empty. Likely RCA: llm_service.embed_text uses signed hash-projection into 512 dims; combined with rag_service.retrieve min_score=0.15 the cosine similarity between a short query and a short chunk falls below threshold. Suggested fixes: (a) lower min_score default to ~0.05, (b) also return top-k unconditionally if scored>0, (c) add a lexical BM25/keyword fallback when semantic retrieval returns empty, (d) increase _VOCAB_DIM or use unsigned TF-IDF to reduce hash collision cancellation.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "RAG Chat citations & observability",
+        "issue": "Because backend returns 0 citations/retrieved_chunks (see backend critical bug), the observability drawer shows 'No chunks retrieved (cache hit or no docs)' and 0 tokens even after a real MISS. Frontend correctly renders whatever the backend returns; fix is in backend retrieval.",
+        "affected_selectors": ["observability-drawer", "citation-badge"]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "Dashboard (before college selected)",
+        "issues": ["Empty state 'Select a college from the top-right to see analytics.' is fine, but the top-right selector button label 'Select College' is very small compared to the sidebar 'Active College' card; the header selector could benefit from a slightly more prominent affordance."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix RAG retrieval: lower rag_service.retrieve min_score threshold (0.15 -> ~0.05), or fall back to lexical retrieval when semantic returns empty, or fix hash-projection embedding to avoid destructive sign cancellation. This is required for Chat, Model Lab grounded_score and Auto QA functional pass-rate to be meaningful."
+  ],
+  "critical_code_review_comments": [
+    "rag_service.retrieve: min_score=0.15 with a signed hash-projected 512-dim TF embedding causes many valid semantic matches to be discarded for short docs. Consider unsigned projection, BM25 fallback, or lower default threshold.",
+    "server.py is 697 lines - approaching the 700 line guideline; consider splitting routers (auth, properties, documents, chat, qa, lab, golden, dashboard) into separate modules.",
+    "server.py POST /api/chat: cache is written to session but never db.commit()'d before returning; the CacheEntry add on line ~357 relies on the subsequent db.add(msg)/commit() flushing it. Works but fragile - make the intent explicit.",
+    "server.py cache_stats hit_rate formula = hits / (hits + entries) is not a true hit rate (should be hits / (hits + misses)). Currently entries acts as a proxy for misses which under-counts hit rate as more entries accumulate.",
+    "Property.property_id uniqueness is global (not per-owner) so two users cannot both use e.g. 'COLLEGE_1' as property_id. If multi-tenancy is intended, make (owner_id, property_id) the unique constraint instead.",
+    "server.py DELETE /api/golden/{gid} does not verify owner_id / property ownership before deleting - any authenticated user can delete any golden case by id.",
+    "server.py POST /api/qa/runs/{run_id}/stop also has no ownership check on run_id."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "93% (14/15 pytest)", "frontend": "~90% (all navigable flows work; RAG answer quality blocked by backend retrieval bug)"},
+  "test_credentials": "admin@vidyagpt.com / Admin@12345 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Backend tests create 'TEST_*' prefixed properties/documents/golden entries and tear them down via session-scoped fixture. Left one 'UI Test College' + one 'sample.txt' document on the seeded admin account from Playwright run for follow-up debugging of the RAG bug.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend test suite lives at /app/backend/tests/backend_test.py and runs green except TestChat.test_chat_then_cache_hit which will start passing once RAG retrieval returns >=1 chunk for a small TXT doc. Auto-QA quick mode takes ~40-60s to complete on this env. Model Lab compare with all 3 models takes ~25s. Property owner isolation confirmed working (404 across users). PostgreSQL persistence verified via create/list/delete round-trips.",
+  "rca of the issue": "RAG retrieval bug — llm_service.embed_text builds a 512-dim signed hash-projected term-frequency vector: for each token, +/- sign chosen from hash bit, so co-occurring hash collisions cancel. When query has few tokens ('what are the admission requirements') and the single doc chunk is short (~30-40 tokens), the cosine similarity often lands below the min_score=0.15 threshold in rag_service.retrieve(). Reproduction: upload the sample doc, POST /api/chat with any grounded question → citations=[]. Mitigation: reduce min_score to ~0.05 as a quick fix, and/or add lexical/BM25 fallback when semantic retrieval returns nothing, and/or switch to an unsigned TF projection to eliminate destructive interference."
+}

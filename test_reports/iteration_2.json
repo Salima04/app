@@ -1,0 +1,33 @@
+{
+  "summary": "Retest of VidyaGPT backend after iteration 1 fixes. Ran full pytest suite (17 tests, all passed). All 4 critical retest items verified: (1) POST /api/chat now returns >=1 citation and >=1 retrieved_chunk for the sample TXT doc; (2) second identical POST /api/chat returns cache_status=HIT with latency<=100ms and tokens_cached>0; (3) POST /api/lab/compare returns non-zero grounded_score results for all 3 models with a valid recommended pick; (4) POST /api/qa/auto quick mode completes with passed+failed==total. Added 2 new ownership tests: DELETE /api/golden/{gid} and POST /api/qa/runs/{run_id}/stop both return 404 when invoked by a non-owner. All previously-passing regression tests (auth, properties, documents CRUD, cache stats, model lab, golden CRUD, dashboard, property isolation) still pass. Backend-only run per request; frontend not tested.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is still ~700 lines; consider splitting routers (auth, properties, documents, chat, qa, lab, golden, dashboard) into modules for maintainability.",
+    "Property.property_id is still globally unique (not per-owner). If multi-tenant reuse of ids like 'COLLEGE_1' is desired, switch to composite (owner_id, property_id) unique constraint.",
+    "cache_stats hit_rate formula (fixed in iteration 2) should be verified against a scenario with real misses tracked; currently entries proxies misses which is acceptable but not a true rate.",
+    "llm_service embed_text: unsigned double-hash projection is a reasonable quick fix, but for production consider a proper embedding model or persisted BM25 index instead of recomputing lexical scores on each retrieve()."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (added TestOwnership class with 2 new tests)"
+  ],
+  "success_rate": {"backend": "100% (17/17 pytest)", "frontend": "not tested (backend-only run requested)"},
+  "test_credentials": "admin@vidyagpt.com / Admin@12345 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Tests self-clean via 'TEST_' prefix and fixture teardown (properties + golden cases deleted after each test class). Auto-QA runs left in DB (no delete endpoint) but scoped to TEST_ properties which are removed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend fully green. RAG retrieval now works via hybrid semantic(0.6)+lexical(0.4) with min_score=0.02 and lexical fallback. Ownership checks in place for golden delete and run stop. Only remaining review-level concerns are code-organisation (server.py size) and the non-per-owner property_id uniqueness; no functional bugs. Frontend was working in iteration 1 aside from the fixed RAG bug — safe to re-verify chat citations + observability drawer in UI on next frontend pass.",
+  "rca of the issue": "Iteration 1 critical RAG bug root cause: signed hash-projected TF embeddings caused destructive cancellation making cosine similarity fall below min_score=0.15. Fix applied in iteration 2: (a) embed_text switched to unsigned double-hash projection (512 dims, positive), (b) rag_service.retrieve() now hybrid = 0.6*semantic + 0.4*lexical with min_score lowered to 0.02, (c) lexical fallback returns top matches on any keyword overlap. Verified: query 'What are the admission requirements?' on the sample doc returns >=1 citation and >=1 chunk; cache HIT works on repeat call."
+}
