@@ -10,6 +10,7 @@ import Chat from "@/pages/Chat";
 import AutoQA from "@/pages/AutoQA";
 import ModelLab from "@/pages/ModelLab";
 import Golden from "@/pages/Golden";
+import Regression from "@/pages/Regression";
 import "@/App.css";
 
 const TITLES = {
@@ -20,6 +21,7 @@ const TITLES = {
   "/app/qa": ["Auto QA Agent", "Auto-generate, execute & evaluate LLM tests"],
   "/app/lab": ["Model Test Lab", "Compare LLMs side-by-side on your docs"],
   "/app/golden": ["Golden Dataset", "Ground-truth Q&A for regression"],
+  "/app/regression": ["Regression Runs", "Auto-rerun Golden Dataset & spot deltas"],
 };
 
 function AppLayout() {
@@ -53,6 +55,7 @@ function App() {
             <Route path="qa" element={<AutoQA />} />
             <Route path="lab" element={<ModelLab />} />
             <Route path="golden" element={<Golden />} />
+            <Route path="regression" element={<Regression />} />
           </Route>
           <Route path="*" element={<Navigate to="/app" replace />} />
         </Routes>

@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, School2, FileText, MessagesSquare, Sparkles, Cpu, BookMarked, LogOut, Zap } from "lucide-react";
+import { LayoutDashboard, School2, FileText, MessagesSquare, Sparkles, Cpu, BookMarked, LogOut, Zap, GitCompareArrows } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 
 const NAV = [
@@ -10,6 +10,7 @@ const NAV = [
   { to: "/app/qa", label: "Auto QA Agent", icon: Sparkles, testId: "nav-qa" },
   { to: "/app/lab", label: "Model Test Lab", icon: Cpu, testId: "nav-lab" },
   { to: "/app/golden", label: "Golden Dataset", icon: BookMarked, testId: "nav-golden" },
+  { to: "/app/regression", label: "Regression", icon: GitCompareArrows, testId: "nav-regression" },
 ];
 
 export default function Sidebar() {

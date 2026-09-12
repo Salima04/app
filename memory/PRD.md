@@ -28,19 +28,20 @@ Build a production-ready "VidyaGPT AI QA Platform" — a RAG-based student chatb
 - Dashboard: KPI cards + quality trend line chart across recent runs
 - Security: JWT, RBAC-lite (role field), property isolation on all endpoints, size-limited uploads (20MB), file type whitelist
 
-## What's Implemented (Jan 2026 — v1)
-- **Backend endpoints**: `/auth/{register,login,forgot,me}`, `/properties[/:id[/toggle]]`, `/documents[/upload|:id[/reprocess]]`, `/chat`, `/conversations[/:id/messages]`, `/cache/stats`, `/qa/auto`, `/qa/runs[/:id[/stop]]`, `/lab/compare`, `/lab/history`, `/lab/models`, `/golden[/:id]`, `/dashboard`
-- **Frontend pages**: Login (dual-column marketing + form), Dashboard (8 KPI cards + trend chart), Colleges (grid + create form), Documents (upload table with live status), RAG Chat (markdown rendering + observability drawer), Auto QA Agent (5 modes + live run + case drilldown), Model Test Lab (side-by-side comparison + Recommended badge), Golden Dataset (CRUD table)
+## What's Implemented (Jan 2026 — v1 + Regression)
+- **Backend endpoints**: `/auth/{register,login,forgot,me}`, `/properties[/:id[/toggle]]`, `/documents[/upload|:id[/reprocess]]`, `/chat`, `/conversations[/:id/messages]`, `/cache/stats`, `/qa/auto`, `/qa/runs[/:id[/stop]]`, `/lab/compare`, `/lab/history`, `/lab/models`, `/golden[/:id]`, `/dashboard`, `/regression/run`, `/regression/runs[/:id]`
+- **Frontend pages**: Login, Dashboard, Colleges, Documents, RAG Chat (with observability drawer), Auto QA Agent (5 modes + case drilldown), Model Test Lab, Golden Dataset, **Regression Runs** (score-trend chart + Improved/Regressed/Same/New tallies + per-case delta chips + Prev-pass/New-pass indicators)
+- **Auto-trigger regression**: A regression run is automatically kicked off in the background on every document upload and reprocess (if golden cases exist), so users see quality drift the moment content changes
+- **Delta tracking**: Every regression case stores `previous_score`, `previous_passed`, `delta`, and `regression_status` (improved / regressed / same / new). Cases that flipped from pass→fail get a highlighted "⚠ Broke a previously passing case" chip, and fail→pass get "✨ Fixed a previously failing case"
 - **Seed**: admin@vidyagpt.com / Admin@12345 auto-created at startup
 
 ## Prioritised Backlog (v2)
 - **P1** Streaming SSE chat response (currently non-streaming)
 - **P1** Reports: PDF / Excel / CSV / JSON export from Auto QA runs and dashboard
-- **P1** Regression mode: automatically re-run against Golden Dataset when doc/prompt changes with previous vs new score delta
 - **P2** OCR for scanned PDFs (Tesseract) & DOCX images
 - **P2** More Auto QA categories: prompt injection variants, RAG poisoning simulation, long-context tests
 - **P2** Real per-model cost pricing pulled from provider metadata
-- **P3** Realtime WebSocket-based live progress for Auto QA runs (currently 2.5s polling)
+- **P3** Realtime WebSocket-based live progress for Auto QA / Regression runs (currently 2.5s polling)
 
 ## Known Limitations
 - Embedding is deterministic hash-TF (offline); production-grade would use OpenAI `text-embedding-3-small` or similar

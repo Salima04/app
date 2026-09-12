@@ -223,7 +223,26 @@ async def upload_doc(property_id: str = Form(...), file: UploadFile = File(...),
     async with SessionLocal() as db2:
         await db2.execute(delete(CacheEntry).where(CacheEntry.property_id == property_id))
         await db2.commit()
+    # auto-trigger regression if golden cases exist
+    await _maybe_trigger_regression(property_id, user.id, "doc_upload")
     return {"id": doc_id, "status": "ready"}
+
+
+async def _maybe_trigger_regression(property_id: str, user_id: str, trigger: str, model_key: str = "gpt-5.4"):
+    """Auto-start a regression run in background if golden cases exist."""
+    async with SessionLocal() as db:
+        gres = await db.execute(select(GoldenCase).where(GoldenCase.property_id == property_id))
+        goldens = gres.scalars().all()
+        if not goldens:
+            return None
+        run = TestRun(property_id=property_id, owner_id=user_id, mode="regression",
+                      model=model_key, status="running", total=len(goldens),
+                      scores={"trigger": trigger})
+        db.add(run); await db.commit(); await db.refresh(run)
+        rid = run.id
+        cases = [(g.id, g.question, g.expected_answer, g.expected_behavior, g.category, g.severity) for g in goldens]
+    asyncio.create_task(_execute_regression(rid, property_id, model_key, cases))
+    return rid
 
 
 async def _process_document(doc_id: str, property_id: str, filename: str, content: bytes):
@@ -275,6 +294,7 @@ async def reprocess_doc(doc_id: str, user: User = Depends(get_current_user), db:
     # invalidate cache
     await db.execute(delete(CacheEntry).where(CacheEntry.property_id == d.property_id))
     await db.commit()
+    await _maybe_trigger_regression(d.property_id, user.id, "doc_reprocess")
     return {"ok": True, "version": d.version}
 
 
@@ -661,6 +681,161 @@ async def del_golden(gid: str, user: User = Depends(get_current_user), db: Async
     await db.execute(delete(GoldenCase).where(GoldenCase.id == gid))
     await db.commit()
     return {"ok": True}
+
+
+# -------- Regression Runs --------
+class RegressionIn(BaseModel):
+    property_id: str
+    model_key: str = "gpt-5.4"
+    trigger: str = "manual"  # manual, doc_change, prompt_change
+
+
+@api.post("/regression/run")
+async def start_regression(inp: RegressionIn, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    prop = await _owns_property(db, inp.property_id, user.id)
+    # collect golden cases
+    gres = await db.execute(select(GoldenCase).where(GoldenCase.property_id == prop.id))
+    goldens = gres.scalars().all()
+    if not goldens:
+        raise HTTPException(400, "No golden cases defined for this property")
+    run = TestRun(property_id=prop.id, owner_id=user.id, mode="regression",
+                  model=inp.model_key, status="running", total=len(goldens))
+    db.add(run); await db.commit(); await db.refresh(run)
+    asyncio.create_task(_execute_regression(run.id, prop.id, inp.model_key,
+                                             [(g.id, g.question, g.expected_answer,
+                                               g.expected_behavior, g.category, g.severity) for g in goldens]))
+    return {"run_id": run.id, "total": len(goldens)}
+
+
+async def _execute_regression(run_id: str, property_id: str, model_key: str, cases: list):
+    async with SessionLocal() as db:
+        # Load last regression run for baseline scores (per golden_case_id)
+        prev_res = await db.execute(select(TestRun).where(
+            TestRun.property_id == property_id, TestRun.mode == "regression",
+            TestRun.id != run_id, TestRun.status == "completed",
+        ).order_by(desc(TestRun.completed_at)).limit(1))
+        prev_run = prev_res.scalar_one_or_none()
+        prev_map = {}
+        if prev_run:
+            pc_res = await db.execute(select(TestCase).where(TestCase.run_id == prev_run.id))
+            for pc in pc_res.scalars().all():
+                if pc.golden_case_id:
+                    prev_map[pc.golden_case_id] = (pc.score, pc.passed)
+
+        chunks = await _load_property_chunks(db, property_id)
+        passed = failed = 0
+        p_counts = {"P0": 0, "P1": 0, "P2": 0, "P3": 0}
+        improved = regressed = same = new_cases = 0
+        total_tokens = 0; total_cost = 0.0; latencies = []
+        acc_scores = []
+
+        for gid, question, expected, behavior, category, severity in cases:
+            row = (await db.execute(select(TestRun).where(TestRun.id == run_id))).scalar_one_or_none()
+            if not row or row.status == "stopped":
+                return
+
+            top = retrieve(question, chunks, top_k=4)
+            if not top:
+                ans_text = "I couldn't find this information in the available college documents."
+                telem = {"tokens_in": 0, "tokens_out": 0, "cost": 0.0, "latency_ms": 15, "model": model_key}
+                context_text = ""
+            else:
+                context = "\n\n".join([f"[{i+1}] (Source: {c['filename']} p.{c['page']})\n{c['text']}" for i, c in enumerate(top)])
+                context_text = context
+                telem = await chat_completion(model_key, RAG_SYSTEM_PROMPT,
+                                               f"CONTEXT:\n{context}\n\nQUESTION: {question}")
+                ans_text = telem["text"]
+            ev = evaluate_answer({"expected_answer": expected, "expected_behavior": behavior}, ans_text, context_text)
+
+            prev_score, prev_passed = prev_map.get(gid, (-1.0, False))
+            if prev_score < 0:
+                new_cases += 1; regression_status = "new"; delta = 0.0
+            else:
+                delta = round(ev["score"] - prev_score, 4)
+                if delta > 0.05:
+                    improved += 1; regression_status = "improved"
+                elif delta < -0.05:
+                    regressed += 1; regression_status = "regressed"
+                else:
+                    same += 1; regression_status = "same"
+
+            tc = TestCase(
+                run_id=run_id, property_id=property_id, category=category, severity=severity,
+                question=question, expected_answer=expected, expected_behavior=behavior,
+                actual_answer=ans_text, passed=ev["passed"], score=ev["score"], reason=ev["reason"],
+                retrieved_context=context_text[:2000],
+                citations=[{"filename": c["filename"], "page": c["page"], "score": c["score"]} for c in top],
+                model=model_key,
+                tokens=telem.get("tokens_in", 0) + telem.get("tokens_out", 0),
+                cost=telem.get("cost", 0.0), latency_ms=telem.get("latency_ms", 0),
+                golden_case_id=gid, previous_score=prev_score, previous_passed=prev_passed,
+                delta=delta, regression_status=regression_status,
+            )
+            db.add(tc)
+            if ev["passed"]: passed += 1
+            else:
+                failed += 1
+                p_counts[severity] = p_counts.get(severity, 0) + 1
+            total_tokens += tc.tokens; total_cost += tc.cost; latencies.append(tc.latency_ms)
+            acc_scores.append(ev["score"])
+
+            await db.execute(update(TestRun).where(TestRun.id == run_id).values(
+                passed=passed, failed=failed,
+                p0=p_counts.get("P0",0), p1=p_counts.get("P1",0),
+                p2=p_counts.get("P2",0), p3=p_counts.get("P3",0),
+                total_tokens=total_tokens, total_cost=total_cost,
+                avg_latency_ms=int(sum(latencies)/max(1,len(latencies))),
+            ))
+            await db.commit()
+
+        overall = round(sum(acc_scores)/len(acc_scores), 3) if acc_scores else 0.0
+        prev_overall = (prev_run.scores or {}).get("overall", 0.0) if prev_run else 0.0
+        # preserve any existing metadata (e.g. trigger) set at run creation
+        existing = row.scores or {}
+        scores = {
+            **existing,
+            "overall": overall,
+            "accuracy": overall,
+            "previous_overall": prev_overall,
+            "overall_delta": round(overall - prev_overall, 3) if prev_run else 0.0,
+            "improved": improved, "regressed": regressed, "same": same, "new": new_cases,
+        }
+        await db.execute(update(TestRun).where(TestRun.id == run_id).values(
+            status="completed", scores=scores, completed_at=datetime.now(timezone.utc),
+        ))
+        await db.commit()
+
+
+@api.get("/regression/runs")
+async def list_regression(property_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await _owns_property(db, property_id, user.id)
+    res = await db.execute(select(TestRun).where(
+        TestRun.property_id == property_id, TestRun.mode == "regression"
+    ).order_by(desc(TestRun.started_at)))
+    return [_run_dict(r) for r in res.scalars().all()]
+
+
+@api.get("/regression/runs/{run_id}")
+async def regression_detail(run_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    rres = await db.execute(select(TestRun).where(TestRun.id == run_id, TestRun.mode == "regression"))
+    r = rres.scalar_one_or_none()
+    if not r:
+        raise HTTPException(404, "Not found")
+    await _owns_property(db, r.property_id, user.id)
+    tc_res = await db.execute(select(TestCase).where(TestCase.run_id == run_id).order_by(TestCase.created_at))
+    cases = tc_res.scalars().all()
+    return {
+        "run": _run_dict(r),
+        "cases": [{"id": c.id, "question": c.question, "expected_answer": c.expected_answer,
+                   "expected_behavior": c.expected_behavior, "actual_answer": c.actual_answer,
+                   "category": c.category, "severity": c.severity, "passed": c.passed,
+                   "score": c.score, "previous_score": c.previous_score,
+                   "previous_passed": c.previous_passed, "delta": c.delta,
+                   "regression_status": c.regression_status, "reason": c.reason,
+                   "golden_case_id": c.golden_case_id, "citations": c.citations,
+                   "latency_ms": c.latency_ms, "tokens": c.tokens, "cost": c.cost}
+                  for c in cases],
+    }
 
 
 # -------- Dashboard --------

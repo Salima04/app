@@ -152,6 +152,11 @@ class TestCase(Base):
     cost: Mapped[float] = mapped_column(Float, default=0.0)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     cache_status: Mapped[str] = mapped_column(String(20), default="MISS")
+    golden_case_id: Mapped[str] = mapped_column(String(36), default="", index=True)
+    previous_score: Mapped[float] = mapped_column(Float, default=-1.0)  # -1 = no baseline
+    previous_passed: Mapped[bool] = mapped_column(Boolean, default=False)
+    delta: Mapped[float] = mapped_column(Float, default=0.0)
+    regression_status: Mapped[str] = mapped_column(String(20), default="")  # improved, regressed, same, new
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
