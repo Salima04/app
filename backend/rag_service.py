@@ -2,6 +2,7 @@
 import io
 import re
 import hashlib
+import logging
 from typing import List, Dict, Tuple
 from pypdf import PdfReader
 from docx import Document as DocxDocument
@@ -9,6 +10,8 @@ import openpyxl
 import csv
 
 from llm_service import embed_text, cosine
+
+log = logging.getLogger("vidyagpt.rag")
 
 
 def extract_text(filename: str, content: bytes) -> List[Tuple[int, str]]:
@@ -46,7 +49,8 @@ def extract_text(filename: str, content: bytes) -> List[Tuple[int, str]]:
         else:  # txt and others
             pages.append((1, content.decode("utf-8", errors="ignore")))
     except Exception as e:
-        pages.append((1, f"[Extraction error: {e}]"))
+        log.exception("document extraction failed")
+        pages.append((1, "[Unable to extract text from this file]"))
     return pages
 
 

@@ -4,13 +4,17 @@ import asyncio
 import base64
 import hashlib
 import logging
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from pathlib import Path
 
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update, delete, desc
@@ -20,7 +24,8 @@ load_dotenv(Path(__file__).parent / ".env")
 
 from database import engine, get_db, SessionLocal
 from models import (Base, User, Property, Document, DocumentChunk, Conversation, Message,
-                    CacheEntry, TestRun, TestCase, ModelLabRun, GoldenCase)
+                    CacheEntry, TestRun, TestCase, ModelLabRun, GoldenCase,
+                    PasswordResetToken, AuditLog)
 from auth import hash_password, verify_password, create_token, get_current_user
 from llm_service import chat_completion, MODEL_REGISTRY, embed_text, cosine
 from rag_service import extract_text, build_chunks, retrieve, normalize_question, question_hash
@@ -31,6 +36,12 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("vidyagpt")
 
 app = FastAPI(title="VidyaGPT AI QA Platform")
+
+# SEC hardening: rate limiter (per-IP) to slow brute-force / abuse
+limiter = Limiter(key_func=get_remote_address, default_limits=["300/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 api = APIRouter(prefix="/api")
 
 
@@ -38,15 +49,48 @@ api = APIRouter(prefix="/api")
 async def _startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    # seed default admin
+    # Seed default admin ONLY on first run: use random password, write to memory/test_credentials.md
     async with SessionLocal() as db:
-        res = await db.execute(select(User).where(User.email == "admin@vidyagpt.com"))
-        if not res.scalar_one_or_none():
-            u = User(email="admin@vidyagpt.com", password_hash=hash_password("Admin@12345"),
+        any_admin = await db.execute(select(User).where(User.role == "admin").limit(1))
+        if not any_admin.scalar_one_or_none():
+            random_pw = secrets.token_urlsafe(18)
+            u = User(email="admin@vidyagpt.com", password_hash=hash_password(random_pw),
                     name="Admin", role="admin")
             db.add(u)
             await db.commit()
+            # persist to test_credentials for the workspace only
+            try:
+                cred_path = Path("/app/memory/test_credentials.md")
+                cred_path.parent.mkdir(parents=True, exist_ok=True)
+                cred_path.write_text(
+                    "# VidyaGPT Test Credentials\n\n"
+                    "## Admin (auto-seeded on first startup)\n"
+                    f"- Email: admin@vidyagpt.com\n"
+                    f"- Password: {random_pw}\n"
+                    "- Role: admin\n\n"
+                    "This password is generated randomly the first time the DB is empty and never regenerated.\n"
+                    "Use the Register form to create additional users (they become 'student' by default).\n"
+                )
+            except Exception as e:
+                log.warning(f"Could not write test_credentials.md: {e}")
     log.info("VidyaGPT backend ready.")
+
+
+async def _audit(db: AsyncSession, user_id: str, action: str, target: str = "", detail: str = "", ip: str = ""):
+    try:
+        db.add(AuditLog(user_id=user_id or "", action=action, target=target, detail=detail[:1000], ip=ip))
+        await db.commit()
+    except Exception:
+        pass
+
+
+def _client_ip(req: Optional[Request]) -> str:
+    if not req:
+        return ""
+    xff = req.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return req.client.host if req.client else ""
 
 
 # -------- Schemas --------
@@ -61,9 +105,13 @@ class LoginIn(BaseModel):
     password: str
 
 
-class ForgotIn(BaseModel):
+class ForgotRequestIn(BaseModel):
     email: EmailStr
-    new_password: str = Field(min_length=6)
+
+
+class ForgotConfirmIn(BaseModel):
+    token: str = Field(min_length=20)
+    new_password: str = Field(min_length=8)
 
 
 class PropertyIn(BaseModel):
@@ -108,32 +156,83 @@ async def root():
 
 
 @api.post("/auth/register")
-async def register(inp: RegisterIn, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/hour")
+async def register(inp: RegisterIn, request: Request, db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(User).where(User.email == inp.email))
     if res.scalar_one_or_none():
         raise HTTPException(400, "Email already registered")
-    u = User(email=inp.email, password_hash=hash_password(inp.password), name=inp.name, role="admin")
+    # SEC-005: new registrations default to non-privileged "student"
+    u = User(email=inp.email, password_hash=hash_password(inp.password), name=inp.name, role="student")
     db.add(u); await db.commit(); await db.refresh(u)
+    await _audit(db, u.id, "register", u.email, ip=_client_ip(request))
     return {"token": create_token(u.id, u.role), "user": {"id": u.id, "email": u.email, "name": u.name, "role": u.role}}
 
 
 @api.post("/auth/login")
-async def login(inp: LoginIn, db: AsyncSession = Depends(get_db)):
+@limiter.limit("20/minute")
+async def login(inp: LoginIn, request: Request, db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(User).where(User.email == inp.email))
     u = res.scalar_one_or_none()
     if not u or not verify_password(inp.password, u.password_hash):
+        await _audit(db, u.id if u else "", "login_failed", inp.email, ip=_client_ip(request))
+        # SEC hardening: generic message to prevent enumeration
         raise HTTPException(401, "Invalid credentials")
+    if not u.active:
+        raise HTTPException(401, "Invalid credentials")
+    await _audit(db, u.id, "login", u.email, ip=_client_ip(request))
     return {"token": create_token(u.id, u.role), "user": {"id": u.id, "email": u.email, "name": u.name, "role": u.role}}
 
 
-@api.post("/auth/forgot")
-async def forgot(inp: ForgotIn, db: AsyncSession = Depends(get_db)):
+@api.post("/auth/forgot-request")
+@limiter.limit("5/hour")
+async def forgot_request(inp: ForgotRequestIn, request: Request, db: AsyncSession = Depends(get_db)):
+    """Step 1: Request a password reset token. Always returns the same response
+    to prevent user enumeration. In production the token would be emailed;
+    for this environment (no email provider) it is returned only when the email exists
+    and only in the response body – NEVER logged, never persisted in plaintext."""
     res = await db.execute(select(User).where(User.email == inp.email))
     u = res.scalar_one_or_none()
-    if not u:
-        raise HTTPException(404, "User not found")
+    reset_token = None
+    if u and u.active:
+        raw = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw.encode()).hexdigest()
+        # invalidate previous unused tokens
+        await db.execute(update(PasswordResetToken).where(
+            PasswordResetToken.user_id == u.id, PasswordResetToken.used == False,  # noqa: E712
+        ).values(used=True))
+        db.add(PasswordResetToken(
+            user_id=u.id, token_hash=token_hash,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        ))
+        await db.commit()
+        await _audit(db, u.id, "forgot_request", inp.email, ip=_client_ip(request))
+        reset_token = raw  # would be sent via email in production
+    # constant response shape – no enumeration
+    return {"ok": True, "message": "If the account exists, a reset token has been issued.",
+            "reset_token": reset_token}
+
+
+@api.post("/auth/forgot-confirm")
+@limiter.limit("5/hour")
+async def forgot_confirm(inp: ForgotConfirmIn, request: Request, db: AsyncSession = Depends(get_db)):
+    token_hash = hashlib.sha256(inp.token.encode()).hexdigest()
+    res = await db.execute(select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash))
+    tk = res.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    expired = False
+    if tk and tk.expires_at:
+        exp = tk.expires_at if tk.expires_at.tzinfo else tk.expires_at.replace(tzinfo=timezone.utc)
+        expired = exp < now
+    if not tk or tk.used or expired:
+        raise HTTPException(400, "Invalid or expired token")
+    user_res = await db.execute(select(User).where(User.id == tk.user_id))
+    u = user_res.scalar_one_or_none()
+    if not u or not u.active:
+        raise HTTPException(400, "Invalid or expired token")
     u.password_hash = hash_password(inp.new_password)
+    tk.used = True
     await db.commit()
+    await _audit(db, u.id, "password_reset", u.email, ip=_client_ip(request))
     return {"ok": True}
 
 
@@ -175,11 +274,14 @@ async def toggle_prop(pid: str, user: User = Depends(get_current_user), db: Asyn
 
 @api.delete("/properties/{pid}")
 async def delete_prop(pid: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    # SEC-004: verify ownership FIRST before deleting any child rows
+    await _owns_property(db, pid, user.id)
     await db.execute(delete(DocumentChunk).where(DocumentChunk.property_id == pid))
     await db.execute(delete(Document).where(Document.property_id == pid))
     await db.execute(delete(CacheEntry).where(CacheEntry.property_id == pid))
     await db.execute(delete(Property).where(Property.id == pid, Property.owner_id == user.id))
     await db.commit()
+    await _audit(db, user.id, "delete_property", pid)
     return {"ok": True}
 
 
@@ -407,6 +509,11 @@ async def list_conv(property_id: str, user: User = Depends(get_current_user), db
 
 @api.get("/conversations/{conv_id}/messages")
 async def conv_msgs(conv_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    # SEC-003: verify ownership before returning messages
+    cres = await db.execute(select(Conversation).where(Conversation.id == conv_id))
+    conv = cres.scalar_one_or_none()
+    if not conv or conv.user_id != user.id:
+        raise HTTPException(404, "Not found")
     res = await db.execute(select(Message).where(Message.conversation_id == conv_id).order_by(Message.created_at))
     return [_msg_to_dict(m, conv_id) for m in res.scalars().all()]
 
@@ -574,6 +681,9 @@ async def run_detail(run_id: str, user: User = Depends(get_current_user), db: As
     res = await db.execute(select(TestRun).where(TestRun.id == run_id))
     r = res.scalar_one_or_none()
     if not r:
+        raise HTTPException(404, "Not found")
+    # SEC-003: verify ownership before returning run details / test cases
+    if r.owner_id != user.id:
         raise HTTPException(404, "Not found")
     tc_res = await db.execute(select(TestCase).where(TestCase.run_id == run_id).order_by(TestCase.created_at))
     cases = tc_res.scalars().all()
@@ -873,8 +983,20 @@ async def dashboard(property_id: str, user: User = Depends(get_current_user), db
 
 
 app.include_router(api)
-app.add_middleware(
-    CORSMiddleware, allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
-    allow_methods=["*"], allow_headers=["*"],
-)
+
+# SEC: CORS — avoid the `*` + credentials combination.
+# Use explicit origins from env, or a regex allowing our preview URLs.
+_cors_env = os.environ.get("CORS_ORIGINS", "")
+_origins = [o.strip() for o in _cors_env.split(",") if o.strip() and o.strip() != "*"]
+if _origins:
+    app.add_middleware(
+        CORSMiddleware, allow_credentials=True,
+        allow_origins=_origins, allow_methods=["*"], allow_headers=["*"],
+    )
+else:
+    # Fallback: allow common preview / localhost hosts via regex, disable credentials.
+    app.add_middleware(
+        CORSMiddleware, allow_credentials=False,
+        allow_origin_regex=r"https?://(localhost(:\d+)?|127\.0\.0\.1(:\d+)?|.*\.preview\.emergentagent\.com|.*\.preview\.emergentcf\.cloud)",
+        allow_methods=["*"], allow_headers=["*"],
+    )

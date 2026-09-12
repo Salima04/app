@@ -2,8 +2,11 @@
 import os
 import time
 import hashlib
+import logging
 from typing import AsyncIterator, List, Dict, Optional
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+
+log = logging.getLogger("vidyagpt.llm")
 
 EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
 
@@ -49,7 +52,10 @@ async def chat_completion(
             elif isinstance(ev, StreamDone):
                 break
     except Exception as e:
-        return {"text": f"[LLM Error: {e}]", "error": str(e), "latency_ms": int((time.time()-start)*1000),
+        # SEC hardening: never leak raw provider error text to the client
+        log.warning(f"LLM error [{model_key}]: {e}")
+        return {"text": "The AI service is temporarily unavailable. Please try again shortly.",
+                "error": "llm_error", "latency_ms": int((time.time()-start)*1000),
                 "tokens_in": 0, "tokens_out": 0, "cost": 0.0, "model": m["model"], "provider": m["provider"]}
     latency_ms = int((time.time() - start) * 1000)
     tokens_in = estimate_tokens(system_message + user_text)

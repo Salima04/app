@@ -10,7 +10,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://vidya-qa-platform.pr
 API = f"{BASE_URL}/api"
 
 ADMIN_EMAIL = "admin@vidyagpt.com"
-ADMIN_PASS = "Admin@12345"
+ADMIN_PASS = "zvZCkbQei9Lcs73c6II01RrV"
 
 SAMPLE_DOC = (
     "Admissions require 60% in 12th standard for BTech program. "

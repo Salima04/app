@@ -1,7 +1,9 @@
 """Auth utilities: JWT + bcrypt."""
 import os
+import secrets
 import bcrypt
 import jwt
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -11,7 +13,30 @@ from sqlalchemy import select
 from database import get_db
 from models import User
 
-JWT_SECRET = os.environ["JWT_SECRET"]
+
+def _load_jwt_secret() -> str:
+    """Load JWT secret. If the env value is a known weak/default placeholder,
+    generate a strong random one and persist it to disk (avoids invalidating tokens on restart)."""
+    raw = os.environ.get("JWT_SECRET", "")
+    weak_markers = ("change-in-prod", "changeme", "your-secret", "secret", "default")
+    is_weak = (not raw) or len(raw) < 40 or any(m in raw.lower() for m in weak_markers)
+    if not is_weak:
+        return raw
+    secret_file = Path(__file__).parent / ".jwt_secret"
+    if secret_file.exists():
+        val = secret_file.read_text().strip()
+        if len(val) >= 40:
+            return val
+    strong = secrets.token_urlsafe(64)
+    try:
+        secret_file.write_text(strong)
+        secret_file.chmod(0o600)
+    except Exception:
+        pass
+    return strong
+
+
+JWT_SECRET = _load_jwt_secret()
 JWT_ALGO = os.environ.get("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE = int(os.environ.get("JWT_EXPIRE_MINUTES", "1440"))
 
